@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en" >
+<head>
+    <meta charset="utf-8">
+<meta name="renderer" content="webkit">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=5">
+
+
+    <link rel="dns-prefetch" //cdn.jsdelivr.net>
+
+
+
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/mdui@1.0.2/dist/css/mdui.min.css">
+
+
+
+    
+<link rel="stylesheet" href="/css/prism-m.css">
+
+    
+
+
+
+<meta name="theme-color" content="#3F51B5">
+
+
+<style>
+    html,body{scroll-behavior:smooth;min-height:100vh}
+    blockquote>strong>a{word-break:break-all}
+    .mdui-hoverable:hover,.mdui-hoverable:focus{-webkit-box-shadow:0 5px 5px -3px rgba(0,0,0,.2),0 8px 10px 1px rgba(0,0,0,.14),0 3px 14px 2px rgba(0,0,0,.12) !important;box-shadow:0 5px 5px -3px rgba(0,0,0,.2),0 8px 10px 1px rgba(0,0,0,.14),0 3px 14px 2px rgba(0,0,0,.12) !important;}
+    .mdui-card-primary-title a{text-decoration:none !important}
+    .page-number{display:none !important}
+    .mdui-container-fluid{transition:opacity .4s}
+    
+        body{background-color: #f6f6f6}
+
+    
+</style>
+    
+    <title>Linux网络收包过程(NAPI+DMA+同步阻塞) | Hexo</title>
+    <link rel="canonical" href="https://FortunaCloud.tech/Linux%E7%BD%91%E7%BB%9C%E6%94%B6%E5%8C%85%E8%BF%87%E7%A8%8B(NAPI+DMA+%E5%90%8C%E6%AD%A5%E9%98%BB%E5%A1%9E).html">
+    <meta name="description" content="前置条件前提：用户进程创建socket，然后使用recvfrom()根据用户传入的fd找到socket对象，遍历接收队列接收数据查看是否有数据。如果没有收到数据或者没有收到足够的数据就启用sk_wait_data阻塞当前进程，sk_wait_data将当前进程(current)关联到所定义的等待队列里，然后将进程状态设为interruptible(也就是阻塞)，调用schedule_timeout">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Linux网络收包过程(NAPI+DMA+同步阻塞)">
+<meta property="og:url" content="https://fortunacloud.tech/Linux%E7%BD%91%E7%BB%9C%E6%94%B6%E5%8C%85%E8%BF%87%E7%A8%8B(NAPI+DMA+%E5%90%8C%E6%AD%A5%E9%98%BB%E5%A1%9E).html">
+<meta property="og:site_name" content="Hexo">
+<meta property="og:description" content="前置条件前提：用户进程创建socket，然后使用recvfrom()根据用户传入的fd找到socket对象，遍历接收队列接收数据查看是否有数据。如果没有收到数据或者没有收到足够的数据就启用sk_wait_data阻塞当前进程，sk_wait_data将当前进程(current)关联到所定义的等待队列里，然后将进程状态设为interruptible(也就是阻塞)，调用schedule_timeout">
+<meta property="og:locale" content="en_US">
+<meta property="article:published_time" content="2023-04-19T13:34:52.000Z">
+<meta property="article:modified_time" content="2023-04-19T14:31:42.000Z">
+<meta property="article:author" content="Fortuna">
+<meta name="twitter:card" content="summary">
+<meta name="generator" content="Hexo 6.3.0"></head>
+<body class="mdui-theme-primary-indigo mdui-theme-accent-pink mdui-appbar-with-toolbar ">
+    <div class="mdui-theme-layout-light">
+    <header id="appbar" class="mdui-appbar mdui-appbar-fixed mdui-shadow-0 mdui-appbar-scroll-hide">
+    <div class="mdui-toolbar">
+        <button mdui-drawer="{target: '.mdui-drawer'}" class="mdui-btn mdui-btn-icon mdui-ripple"><i class="mdui-icon material-icons">menu</i></button>
+        <a href="/" class="mdui-typo-title">Hexo</a>
+        <div class="mdui-toolbar-spacer"></div>
+        
+        <a href="/search/" class="mdui-btn mdui-btn-icon mdui-ripple"><i class="mdui-icon material-icons">search</i></a>
+        
+    </div>
+</header>
+    <aside class="mdui-drawer mdui-drawer-close">
+    <nav class="mdui-list" mdui-collapse="{accordion: true}">
+        <a href="#" class="mdui-list-item mdui-ripple h-card">
+            <div class="mdui-list-item-avatar">
+                
+                <i class="mdui-color-theme-primary mdui-icon material-icons">person</i>
+                
+            </div>
+            <div class="mdui-list-item-content p-name">Fortuna</div>
+            <span style="display:none" class="u-url u-uid">https://FortunaCloud.tech</span>
+        </a>
+        <div class="mdui-divider"></div>
+        
+        <a href="/" class="mdui-list-item mdui-ripple">
+            <i class="mdui-list-item-icon mdui-icon material-icons">home</i>
+            <div class="mdui-list-item-content">Home</div>
+        </a>
+        
+        <div class="mdui-collapse-item">
+            <div class="mdui-collapse-item-header mdui-list-item mdui-ripple">
+                <i class="mdui-list-item-icon mdui-icon material-icons">inbox</i>
+                <div class="mdui-list-item-content">Archives</div>
+                <i class="mdui-collapse-item-arrow mdui-icon material-icons">keyboard_arrow_down</i>
+            </div>
+            <div class="mdui-collapse-item-body mdui-list mdui-list-dense">
+                <a class="mdui-list-item mdui-ripple m-link" href="/archives/2023/04/">April 2023</a><a class="mdui-list-item mdui-ripple m-link" href="/archives/2022/10/">October 2022</a>
+            </div>
+        </div>
+        
+        <div class="mdui-collapse-item">
+            <div class="mdui-collapse-item-header mdui-list-item mdui-ripple">
+                <i class="mdui-list-item-icon mdui-icon material-icons">apps</i>
+                <div class="mdui-list-item-content">Categories</div>
+                <i class="mdui-collapse-item-arrow mdui-icon material-icons">keyboard_arrow_down</i>
+            </div>
+            <div class="mdui-collapse-item-body mdui-list mdui-list-dense">
+                <a class="mdui-list-item mdui-ripple m-link" href="/categories/Linux%E7%BD%91%E7%BB%9C/">Linux网络</a><a class="mdui-list-item mdui-ripple m-link" href="/categories/Performance/">Performance</a>
+            </div>
+        </div>
+        
+    </nav>
+    <div class="mdui-divider"></div>
+    <footer class="mdui-m-l-2 mdui-m-t-1 mdui-typo mdui-text-color-theme-disabled">
+        <p class="mdui-m-b-0">
+            
+            ©
+            2023 Fortuna<br>
+            
+            Powered by <a href="https://hexo.io/" rel="noreferrer" target="_blank">Hexo</a><br>
+            
+            Theme - <a href="https://github.com/kwaa/hexo-theme-m" rel="noreferrer" target="_blank"
+                mdui-tooltip="{position:'right', content: 'by 藍+85CD'}">M</a></p>
+            
+    </footer>
+</aside>
+    </div>
+    <div class="mdui-container-fluid mdui-center" style="max-width:720px">
+        <article class="h-entry mdui-card mdui-hoverable mdui-shadow-1 mdui-m-y-2" style="opacity: 1; border-radius: 4px"
+>
+    
+    <div class="mdui-card-primary mdui-ripple">
+    <div class="mdui-card-primary-title">
+        <a role="heading" aria-level="1" class="u-url p-name mdui-text-color-theme-text" >Linux网络收包过程(NAPI+DMA+同步阻塞)</a>
+        <a class="p-author h-card" style="display:none" href="https://FortunaCloud.tech">Fortuna</a>
+        
+        <small> <a class="mdui-text-color-theme-text category-link" href="/categories/Linux%E7%BD%91%E7%BB%9C/">Linux网络</a></small>
+        
+    </div>
+    <div class="mdui-card-primary-subtitle mdui-typo">
+        
+        <time class="dt-published" mdui-tooltip="{content:'Created: 2023-04-19 09:34<br>Updated: 2023-04-19 10:31'}" datetime="2023-04-19T13:34:52.000Z">2023-04-19</time>
+        <span>-</span>
+        
+            <span>Linux网络收包过程(NAPI+DMA+同步阻塞).html</span>
+        
+    </div>
+</div>
+    
+    
+    <div class="mdui-divider"></div>
+    <div class="mdui-card-content mdui-typo">
+        
+        <div class="p-summary" style="display:none"><h3 id="前置条件"><a href="#前置条件" class="headerlink" title="前置条件"></a>前置条件</h3><p>前提：用户进程创建socket，然后使用recvfrom()根据用户传入的fd找到socket对象，遍历接收队列接收数据查看是否有数据。如果没有收到数据或者没有收到足够的数据就启用sk_wait_data阻塞当前进程，sk_wait_data将当前进程(current)关联到所定义的等待队列里，然后将进程状态设为interruptible(也就是阻塞)，调用schedule_timeout让出cpu。自此只要内核收完数据产生就绪事件的时候，就可以通过查找socket上的等待项，进而找到回调函数和等待该socket就绪事件的进程了。切换上下文，等待数据到达网卡。</p></div>
+        <main class="e-content"><h3 id="前置条件"><a href="#前置条件" class="headerlink" title="前置条件"></a>前置条件</h3><p>前提：用户进程创建socket，然后使用recvfrom()根据用户传入的fd找到socket对象，遍历接收队列接收数据查看是否有数据。如果没有收到数据或者没有收到足够的数据就启用sk_wait_data阻塞当前进程，sk_wait_data将当前进程(current)关联到所定义的等待队列里，然后将进程状态设为interruptible(也就是阻塞)，调用schedule_timeout让出cpu。自此只要内核收完数据产生就绪事件的时候，就可以通过查找socket上的等待项，进而找到回调函数和等待该socket就绪事件的进程了。切换上下文，等待数据到达网卡。</p>
+<span id="more"></span> 
+<p>‍</p>
+<h3 id="详细流程"><a href="#详细流程" class="headerlink" title="详细流程"></a>详细流程</h3><p>1、数据帧从外部网络到达网卡的接收队列，如网卡开启了多队列，就会通过对 packet 头(例如源地址、目的地址、端口等)做哈希来决定将 packet 放到哪个 RX 队列<br>2、网卡在分配给自己的RingBuffer中寻找可用的内存位置，找到后DMA引擎把数据DMA到网卡之前关联的地址空间中。如果ring buffer满了，新的数据包将被丢弃。<br>3、内存拷贝完成后向cpu发起一个硬中断<br>4、cpu执行驱动注册的硬中断处理函数。硬中断过程中会记录硬件中断频率，然后修改了Per-cpu变量softnet_data里的pill_list，将驱动里的napi_struct传过来的poll_list添加进来<br>5、启动NAPI， __raise_softirq_irqoff触发了一个软中断<br>6、ksoftirqd根据当前软中断类型，调用对应的action方法<br>7、net_rx_action调用local_irq_disable将当前cpu核心的硬中断关闭，然后获取当前cpu变量softnet_data，对其poll_list进行遍历，然后执行到网卡启动注册到的poll函数<br>8、igb_fetch_rx_buffer和igb_isn_non_eop将数据帧从RingBuffer中取下来。获取的一个数据帧用一个sk_buff来表示，skb被取下来后会通过igb_alloc_rx_buffers申请一个新的skb再重新挂上去<br>9、收取完数据后，对其进行校验，然后设置skb变量的timestamp、vlan id、protocol等字段<br>10、进入napi_gro_receive函数，把相关小包合并成一个大包，目的是减少传送给网络栈的包数，以减少对cpu的使用量<br>11、napi_skb_finish调用了netif_receive_skb将数据包根据其协议传送至对应协议栈进行处理。如果是ARP包就会送到arp_rcv()中，如果是TCP包，就会依次送到ip_rcv()、tcp_v4_rcv()等协议处理函数中进行处理(详细过程是通过pyper_base找到ip_rcv函数地址，进而将ip包送到ip_rcv函数中执行，在ip_rcv函数中会通过inet_protos找到tcp或udp的处理函数)。这里也作为tcpdump的抓包点，tcpdump将抓包函数以虚拟协议的形式挂在ptype_all上遍历所有协议<br>12、进入ip_rcv()函数后，会执行NF_HOOK钩子函数，也就是iptables netfiliter中的那个。ip_rcv()函数对数据包的合法性进行检查，并且设置一些必要字段之后，经过PRE_ROUTING钩子点。<br>13、当执行完注册的钩子后就会执行最后一个参数指向的函数ip_rcv_finish，该函数的主要功能是查找路由表，决定数据包是输入到本地还是转发。在ip_route_input_mc中，函数ip_local_deliver被路由子系统赋值给dst.input。当数据包输入本地时，dst_input函数实际调用了ip_local_deliver函数，函数首先对分片进行检查，如果是分片则需要进行重组，然后经过NF_INET_LOCAL_IN钩子点，之后调用ip_local_deliver_finish继续进行输入本地的其他工作dst_input函数实际调用了ip_local_deliver函数，函数首先对分片进行检查，如果是分片则需要进行重组，然后经过NF_INET_LOCAL_IN钩子点，之后调用ip_local_deliver_finish继续进行输入本地的其他工作。如果数据包需要转发时，dst_input函数实际调用了ip_forward函数，函数数据包进行合法性检查，然后经过NF_INET_FORWARD钩子点，之后调用ip_forward_finish继续进行转发的其他工作，ip_forward_finish在输出数据包的时候，实际上又调用dst_output，实际上就是ip_output函数；<br>14、根据包中的协议类型，skb包被进一步派送到更上层的协议栈中<br>15、以tcp为例，ksoftirqd发现是tcp包就会执行tcp_v4_rcv()函数，在tcp_v4_rcv()函数中会根据数据包header中源目的的ip、port信息查找到对应的socket，然后查看socket是否被用户锁定。发现未锁定就会执行tcp_v4_do_rcv()函数<br>16、在tcp_v4_do_rcv()函数中会执行连接状态下的数据处理，如果是连接状态为ESTABLISH的数据包，就会进入tcp_rcv-established函数处理<br>17、tcp_rcv-established函数通过调用tcp_queue_rcv函数接收数据<br>18、tcp_queue_rcv函数把接收到的数据放到socket的接收队列的尾部<br>19、tcp_rcv-established函数等待tcp_queue_rcv函数执行完成后，接着调用sk_data_ready函数唤醒在socket上等待的用户进程<br>‍</p>
+<h3 id="总结"><a href="#总结" class="headerlink" title="总结"></a>总结</h3><p>数据到达网卡后，网卡DMA控制器接手总线控制权，将数据帧加载至预留给DMA控制器使用的地址空间(Ring Buffer)内。接着网卡向 CPU 发起硬件中断，当 CPU 收到硬件中断请求后，根据中断表，调用网络设备驱动注册的硬中断处理函数。硬中断处理函数发起软中断请求。ksoftirqd检测到有软中断请求到达，首先关闭硬中断释放CPU资源，然后调用poll开始轮询收包。poll会将数据帧从Ring Buffer上摘下，然后交给各级协议栈处理。协议层处理完成后的数据被放在socket的接收队列中。最后唤醒等待队列上的进程<br>‍</p>
+<h3 id="补充"><a href="#补充" class="headerlink" title="补充"></a>补充</h3><p>ifconfig中的overruns表示因环形队列满被丢弃的包数<br>硬中断在哪个cpu核心上被响应，软中断就会在那个核心上进行处理。并且从网卡硬件中断层面就可以设置让收到的包被不同的cpu处理，可以通过irqbalance或修改&#x2F;proc&#x2F;irq&#x2F;IRQ_NUMBER&#x2F;smp_affinity，从而修改和cpu的绑定关系。</p>
+</main>
+        
+        <blockquote class="mdui-m-x-0 mdui-m-t-4">
+    <strong>
+        Author: <a href="#">Fortuna</a><br>
+        URL: <a href="https://fortunacloud.tech/Linux%E7%BD%91%E7%BB%9C%E6%94%B6%E5%8C%85%E8%BF%87%E7%A8%8B(NAPI+DMA+%E5%90%8C%E6%AD%A5%E9%98%BB%E5%A1%9E).html">https://fortunacloud.tech/Linux%E7%BD%91%E7%BB%9C%E6%94%B6%E5%8C%85%E8%BF%87%E7%A8%8B(NAPI+DMA+%E5%90%8C%E6%AD%A5%E9%98%BB%E5%A1%9E).html</a><br>
+        
+            This work is licensed under a <a rel="license noopener" target="_blank" href="https://creativecommons.org/licenses/by-sa/4.0/"></a> .
+        
+    </strong>
+</blockquote>
+        
+    </div>
+    
+</article>
+
+<nav class="mdui-theme-layout-light mdui-color-transparent mdui-row mdui-m-b-2">
+    
+        <div class="mdui-col-xs-12 mdui-m-b-2">
+            <span disabled class="extend prev mdui-btn mdui-ripple mdui-float-left" rel="prev">
+                <i class="mdui-icon mdui-icon-left material-icons">arrow_back</i>
+            </span>
+        </div>
+    
+        <div class="mdui-col-xs-12">
+            <a class="extend next mdui-btn mdui-ripple mdui-float-right mdui-text-truncate" rel="next"
+                style="max-width: 100%" href="/CPU%E6%80%A7%E8%83%BD%E7%AF%87.html">
+                <i class="mdui-icon mdui-icon-right material-icons">arrow_forward</i>CPU性能篇
+            </a>
+        </div>
+    
+</nav>
+
+    </div>
+    <a href="#" class="mdui-fab mdui-fab-fixed mdui-hidden-xs mdui-color-theme-accent mdui-ripple"><i class="mdui-icon material-icons">keyboard_arrow_up</i></a>
+
+<script src="https://cdn.jsdelivr.net/npm/mdui@1.0.2/dist/js/mdui.min.js"></script>
+
+
+<script>
+    var $ = mdui.$;
+    function init(){
+        //
+    }
+    window.addEventListener("load", () => {
+        //
+        init()
+    }, {once: true});
+</script>
+
+</body>
+</html>
